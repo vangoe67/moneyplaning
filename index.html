@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI แยกขยะ (Waste Classifier)</title>
+    <style>
+        body { 
+            font-family: 'Sarabun', sans-serif; 
+            text-align: center; 
+            background-color: #f4f7f6; 
+            padding: 20px; 
+        }
+        .container { 
+            max-width: 500px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 15px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+        }
+        h1 { color: #2c3e50; }
+        button { 
+            background-color: #27ae60; 
+            color: white; 
+            border: none; 
+            padding: 12px 24px; 
+            font-size: 16px; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            margin-bottom: 20px; 
+            transition: 0.3s;
+        }
+        button:hover { background-color: #219150; }
+        #webcam-container { margin-bottom: 20px; display: flex; justify-content: center; }
+        #webcam-container canvas { border-radius: 10px; border: 3px solid #bdc3c7; }
+        #label-container div { 
+            margin-top: 10px; 
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #34495e; 
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>♻️ AI คัดแยกขยะ</h1>
+    <p>เปิดกล้องและนำขยะมาส่อง เพื่อให้ AI ช่วยแยกประเภท</p>
+    <button type="button" onclick="init()">เปิดกล้อง & เริ่มวิเคราะห์</button>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
+</div>
+
+<!-- โหลด Library ของ TensorFlow.js และ Teachable Machine -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+<script>
+    // *** สำคัญ: นำ URL ของ Model จาก Teachable Machine มาใส่ตรงนี้ ***
+    // (อันนี้เป็น URL ตัวอย่าง คุณต้องเปลี่ยนเป็นของคุณเอง)
+    const URL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/";
+
+    let model, webcam, labelContainer, maxPredictions;
+
+    // ฟังก์ชันเริ่มทำงานเมื่อกดปุ่ม
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        // 1. โหลดโมเดล AI
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        // 2. ตั้งค่าและเปิดกล้องเว็บแคม
+        const flip = true; // พลิกภาพซ้ายขวาเหมือนกระจก
+        webcam = new tmImage.Webcam(300, 300, flip);
+        await webcam.setup(); // ขออนุญาตใช้งานกล้อง
+        await webcam.play();
+        window.requestAnimationFrame(loop); // สั่งให้ทำงานซ้ำๆ เพื่อสแกนภาพตลอดเวลา
+
+        // 3. นำภาพจากกล้องไปแสดงบนหน้าเว็บ
+        document.getElementById("webcam-container").innerHTML = "";
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        labelContainer = document.getElementById("label-container");
+        labelContainer.innerHTML = "";
+        for (let i = 0; i < maxPredictions; i++) { 
+            labelContainer.appendChild(document.createElement("div"));
+        }
+    }
+
+    async function loop() {
+        webcam.update(); // อัปเดตเฟรมภาพ
+        await predict(); // เรียกฟังก์ชันวิเคราะห์
+        window.requestAnimationFrame(loop);
+    }
+
+    // ฟังก์ชันคาดเดาประเภทขยะ
+    async function predict() {
+        const prediction = await model.predict(webcam.canvas);
+        for (let i = 0; i < maxPredictions; i++) {
+            // คำนวณความแม่นยำเป็นเปอร์เซ็นต์
+            const probability = (prediction[i].probability * 100).toFixed(0);
+            
+            // แสดงผลลัพธ์ (เช่น "ขวดพลาสติก: 95%")
+            const classPrediction = prediction[i].className + ": " + probability + "%";
+            labelContainer.childNodes[i].innerHTML = classPrediction;
+        }
+    }
+</script>
+
+</body>
+</html>
