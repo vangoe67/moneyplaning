@@ -1,116 +1,114 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI แยกขยะ (Waste Classifier)</title>
-    <style>
-        body { 
-            font-family: 'Sarabun', sans-serif; 
-            text-align: center; 
-            background-color: #f4f7f6; 
-            padding: 20px; 
-        }
-        .container { 
-            max-width: 500px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 15px; 
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
-        }
-        h1 { color: #2c3e50; }
-        button { 
-            background-color: #27ae60; 
-            color: white; 
-            border: none; 
-            padding: 12px 24px; 
-            font-size: 16px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            margin-bottom: 20px; 
-            transition: 0.3s;
-        }
-        button:hover { background-color: #219150; }
-        #webcam-container { margin-bottom: 20px; display: flex; justify-content: center; }
-        #webcam-container canvas { border-radius: 10px; border: 3px solid #bdc3c7; }
-        #label-container div { 
-            margin-top: 10px; 
-            font-size: 18px; 
-            font-weight: bold; 
-            color: #34495e; 
-            background: #ecf0f1;
-            padding: 10px;
-            border-radius: 8px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Ephemeral Chat</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    #chat-box { height: 300px; border: 1px solid #ccc; overflow-y: auto; padding: 10px; }
+    .msg-item { margin-bottom: 10px; }
+    .msg-item img { max-width: 200px; display: block; }
+  </style>
 </head>
 <body>
+  <div id="chat-box"></div>
+  <input type="text" id="text-input" placeholder="พิมพ์ข้อความ...">
+  <input type="file" id="file-input" accept="image/*">
+  <button onclick="sendText()">ส่งข้อความ</button>
 
-<div class="container">
-    <h1>♻️ AI คัดแยกขยะ</h1>
-    <p>เปิดกล้องและนำขยะมาส่อง เพื่อให้ AI ช่วยแยกประเภท</p>
-    <button type="button" onclick="init()">เปิดกล้อง & เริ่มวิเคราะห์</button>
-    <div id="webcam-container"></div>
-    <div id="label-container"></div>
-</div>
+  <script>
+    const socket = io();
+    // เก็บอ้างอิง DOM Elements ไว้ใน RAM ชั่วคราว
+    const activeMessages = new Map();
 
-<!-- โหลด Library ของ TensorFlow.js และ Teachable Machine -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    // รับข้อมูลจากเซิร์ฟเวอร์
+    socket.on('receive-payload', (payload) => {
+      renderPayload(payload, false);
+    });
 
-<script>
-    // *** สำคัญ: นำ URL ของ Model จาก Teachable Machine มาใส่ตรงนี้ ***
-    // (อันนี้เป็น URL ตัวอย่าง คุณต้องเปลี่ยนเป็นของคุณเอง)
-    const URL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/";
+    // รับคำสั่งลบข้อมูล
+    socket.on('destroy-payload', (id) => {
+      purgeFromMemory(id);
+    });
 
-    let model, webcam, labelContainer, maxPredictions;
+    function sendText() {
+      const input = document.getElementById('text-input');
+      if (!input.value) return;
 
-    // ฟังก์ชันเริ่มทำงานเมื่อกดปุ่ม
-    async function init() {
-        const modelURL = URL + "model.json";
-        const metadataURL = URL + "metadata.json";
+      const payload = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+        type: 'text',
+        content: input.value
+      };
 
-        // 1. โหลดโมเดล AI
-        model = await tmImage.load(modelURL, metadataURL);
-        maxPredictions = model.getTotalClasses();
+      renderPayload(payload, true);
+      socket.emit('send-payload', payload);
+      input.value = '';
+    }
 
-        // 2. ตั้งค่าและเปิดกล้องเว็บแคม
-        const flip = true; // พลิกภาพซ้ายขวาเหมือนกระจก
-        webcam = new tmImage.Webcam(300, 300, flip);
-        await webcam.setup(); // ขออนุญาตใช้งานกล้อง
-        await webcam.play();
-        window.requestAnimationFrame(loop); // สั่งให้ทำงานซ้ำๆ เพื่อสแกนภาพตลอดเวลา
+    // จัดการการส่งรูปภาพแบบ Base64 ใน RAM
+    document.getElementById('file-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
 
-        // 3. นำภาพจากกล้องไปแสดงบนหน้าเว็บ
-        document.getElementById("webcam-container").innerHTML = "";
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
-        labelContainer = document.getElementById("label-container");
-        labelContainer.innerHTML = "";
-        for (let i = 0; i < maxPredictions; i++) { 
-            labelContainer.appendChild(document.createElement("div"));
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const payload = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          type: 'image',
+          content: evt.target.result // ส่งข้อมูลรูปภาพในรูปแบบ Data URL
+        };
+
+        renderPayload(payload, true);
+        socket.emit('send-payload', payload);
+      };
+      reader.readAsDataURL(file);
+      this.value = ''; // เคลียร์ File Input ทันทีเพื่อไม่ให้ค้างใน DOM
+    });
+
+    function renderPayload(payload, isSelf) {
+      const chatBox = document.getElementById('chat-box');
+      const div = document.createElement('div');
+      div.className = 'msg-item';
+      div.id = `msg-${payload.id}`;
+
+      if (payload.type === 'text') {
+        div.innerText = payload.content + ' ';
+      } else if (payload.type === 'image') {
+        const img = document.createElement('img');
+        img.src = payload.content;
+        div.appendChild(img);
+      }
+
+      const unsendBtn = document.createElement('button');
+      unsendBtn.innerText = 'ยกเลิกข้อความ';
+      unsendBtn.onclick = () => socket.emit('unsend-payload', payload.id);
+      div.appendChild(unsendBtn);
+
+      chatBox.appendChild(div);
+      activeMessages.set(payload.id, div);
+    }
+
+    // ฟังก์ชันทำลายข้อมูลออกจากหน่วยความจำและหน้าจอ
+    function purgeFromMemory(id) {
+      const element = activeMessages.get(id);
+      if (element) {
+        // เคลียร์การอ้างอิงรูปภาพ เพื่อให้ Garbage Collector ทำงานทันที
+        const img = element.querySelector('img');
+        if (img) {
+          img.src = '';
         }
+        element.remove();
+        activeMessages.delete(id);
+      }
     }
 
-    async function loop() {
-        webcam.update(); // อัปเดตเฟรมภาพ
-        await predict(); // เรียกฟังก์ชันวิเคราะห์
-        window.requestAnimationFrame(loop);
-    }
-
-    // ฟังก์ชันคาดเดาประเภทขยะ
-    async function predict() {
-        const prediction = await model.predict(webcam.canvas);
-        for (let i = 0; i < maxPredictions; i++) {
-            // คำนวณความแม่นยำเป็นเปอร์เซ็นต์
-            const probability = (prediction[i].probability * 100).toFixed(0);
-            
-            // แสดงผลลัพธ์ (เช่น "ขวดพลาสติก: 95%")
-            const classPrediction = prediction[i].className + ": " + probability + "%";
-            labelContainer.childNodes[i].innerHTML = classPrediction;
-        }
-    }
-</script>
-
+    // ทำลายข้อมูลใน RAM ทั้งหมดเมื่อปิดหรือรีโหลดหน้าเว็บ
+    window.addEventListener('beforeunload', () => {
+      activeMessages.forEach((el, id) => purgeFromMemory(id));
+      activeMessages.clear();
+      document.getElementById('chat-box').innerHTML = '';
+    });
+  </script>
 </body>
 </html>
